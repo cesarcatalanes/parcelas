@@ -107,11 +107,8 @@ N = st.slider("Número de parcelas", 5, 20, 12)
 num_trabajadores = st.slider("Número de trabajadores", 1, 10, 6)
 
 # Generar datos
-np.random.seed(42)
-random.seed(42)
 valores = np.random.randint(100, 1201, size=N)
 pesos = np.round(np.random.uniform(1, 10, size=N), 1)
-C = random.randint(1000, 2500)
 W = num_trabajadores * 40
 
 df_parcelas = pd.DataFrame({
@@ -122,13 +119,16 @@ df_parcelas = pd.DataFrame({
 
 st.subheader("Parcelas iniciales")
 st.dataframe(df_parcelas)
-st.write(f"**Capacidad vehículo:** {C}")
 st.write(f"**Capacidad de trabajo total (horas):** {W}")
 
 # Selección de algoritmo
 algoritmo = st.selectbox("Seleccione el algoritmo", ["Genético", "Recocido Simulado", "Búsqueda Tabú"])
 
 if st.button("Ejecutar optimización"):
+    # 🔹 Aquí se genera C en cada ejecución
+    C = random.randint(1000, 2500)
+    st.write(f"**Capacidad vehículo (generada esta corrida):** {C}")
+
     if algoritmo == "Genético":
         historico = algoritmo_genetico(valores, pesos, C, W)
     elif algoritmo == "Recocido Simulado":
