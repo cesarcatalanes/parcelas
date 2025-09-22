@@ -1,155 +1,146 @@
 import streamlit as st
 import numpy as np
-import math
+import pandas as pd
+import random
 import matplotlib.pyplot as plt
 
-# Funciones de inicialización
-def inicializar_problema(N, trabajadores,
-                         min_kg, max_kg,
-                         min_h, max_h,
-                         min_C, max_C):
-    V = np.random.randint(min_kg, max_kg + 1, N)
-    P = np.round(np.random.uniform(min_h, max_h, N), 2)
-    C = np.random.randint(min_C, max_C + 1)
-    W = trabajadores * 40  # horas totales
-    return V, P, C, W
-
-def fitness(X, V, P, C, W):
-    total_v = np.sum(V * X)
-    total_p = np.sum(P * X)
-    if total_p > W or total_v > C:
+# =============================
+# Función de fitness
+# =============================
+def calcular_fitness(individuo, valores, pesos, C, W):
+    valor_total = np.sum(individuo * valores)
+    peso_total = np.sum(individuo * pesos)
+    if peso_total > W or valor_total > C:
         return 0
-    return total_v
+    return valor_total
 
-
-# Algoritmos
-def genetico(V, P, C, W, pop_size=50, generations=200, mutation_rate=0.05):
-    N = len(V)
-    poblacion = np.random.randint(0, 2, (pop_size, N))
-    mejor = None
-    historial = []
-
-    for _ in range(generations):
-        fit = np.array([fitness(ind, V, P, C, W) for ind in poblacion])
-        historial.append(fit.max())
-        padres = poblacion[np.argsort(fit)[-pop_size//2:]]
+# =============================
+# Algoritmo Genético
+# =============================
+def algoritmo_genetico(valores, pesos, C, W, num_generaciones=50, tam_poblacion=30, prob_mutacion=0.1):
+    N = len(valores)
+    poblacion = [np.random.randint(0, 2, size=N) for _ in range(tam_poblacion)]
+    historico_mejor = []
+    for gen in range(num_generaciones):
+        fitness = [calcular_fitness(ind, valores, pesos, C, W) for ind in poblacion]
+        historico_mejor.append(max(fitness))
+        padres = []
+        for _ in range(tam_poblacion):
+            i, j = random.sample(range(tam_poblacion), 2)
+            padres.append(poblacion[i] if fitness[i] > fitness[j] else poblacion[j])
         hijos = []
-        for _ in range(pop_size):
-            p1, p2 = padres[np.random.randint(len(padres), size=2)]
-            corte = np.random.randint(1, N-1)
-            child = np.concatenate([p1[:corte], p2[corte:]])
-            mask = np.random.rand(N) < mutation_rate
-            child[mask] = 1 - child[mask]
-            hijos.append(child)
-        poblacion = np.array(hijos)
-        if mejor is None or fit.max() > fitness(mejor, V, P, C, W):
-            mejor = poblacion[fit.argmax()]
-    return mejor, historial
+        for i in range(0, tam_poblacion, 2):
+            padre1, padre2 = padres[i], padres[i+1]
+            punto = random.randint(1, N-1)
+            hijo1 = np.concatenate((padre1[:punto], padre2[punto:]))
+            hijo2 = np.concatenate((padre2[:punto], padre1[punto:]))
+            hijos.extend([hijo1, hijo2])
+        for hijo in hijos:
+            if random.random() < prob_mutacion:
+                pos = random.randint(0, N-1)
+                hijo[pos] = 1 - hijo[pos]
+        poblacion = hijos
+    return historico_mejor
 
-def recocido_simulado(V, P, C, W, T=1000, alpha=0.95, max_iter=2000):
-    N = len(V)
-    actual = np.random.randint(0, 2, N)
-    mejor = np.copy(actual)
-    historial = []
+# =============================
+# Recocido Simulado
+# =============================
+def recocido_simulado(valores, pesos, C, W, temp_inicial=100, temp_final=1, alpha=0.95, max_iter=500):
+    N = len(valores)
+    sol_actual = np.random.randint(0, 2, size=N)
+    fit_actual = calcular_fitness(sol_actual, valores, pesos, C, W)
+    mejor = fit_actual
+    historico = [fit_actual]
+    temp = temp_inicial
+    while temp > temp_final:
+        for _ in range(max_iter):
+            vecino = sol_actual.copy()
+            pos = random.randint(0, N-1)
+            vecino[pos] = 1 - vecino[pos]
+            fit_vecino = calcular_fitness(vecino, valores, pesos, C, W)
+            if fit_vecino > fit_actual or random.random() < np.exp((fit_vecino - fit_actual) / temp):
+                sol_actual, fit_actual = vecino, fit_vecino
+                mejor = max(mejor, fit_actual)
+        historico.append(mejor)
+        temp *= alpha
+    return historico
 
-    for _ in range(max_iter):
-        vecino = np.copy(actual)
-        idx = np.random.randint(N)
-        vecino[idx] = 1 - vecino[idx]
-        delta = fitness(vecino, V, P, C, W) - fitness(actual, V, P, C, W)
-        if delta > 0 or np.random.rand() < math.exp(delta / T):
-            actual = vecino
-            if fitness(actual, V, P, C, W) > fitness(mejor, V, P, C, W):
-                mejor = np.copy(actual)
-        historial.append(fitness(mejor, V, P, C, W))
-        T *= alpha
-        if T < 1e-3:
-            break
-    return mejor, historial
-
-def busqueda_tabu(V, P, C, W, max_iter=200, tabu_tam=10):
-    N = len(V)
-    actual = np.random.randint(0, 2, N)
-    mejor = np.copy(actual)
-    historial = []
-    tabu = []
-
+# =============================
+# Búsqueda Tabú
+# =============================
+def busqueda_tabu(valores, pesos, C, W, max_iter=200, tabu_tam=10):
+    N = len(valores)
+    sol_actual = np.random.randint(0, 2, size=N)
+    fit_actual = calcular_fitness(sol_actual, valores, pesos, C, W)
+    mejor = sol_actual.copy()
+    mejor_fit = fit_actual
+    tabu_list = []
+    historico = [fit_actual]
     for _ in range(max_iter):
         vecinos = []
-        for j in range(N):
-            vecino = np.copy(actual)
-            vecino[j] = 1 - vecino[j]
-            if not any((vecino == t).all() for t in tabu):
-                vecinos.append(vecino)
-        if not vecinos:
-            break
-        vecinos_fit = [fitness(v, V, P, C, W) for v in vecinos]
-        mejor_vecino = vecinos[np.argmax(vecinos_fit)]
-        actual = mejor_vecino
-        if fitness(actual, V, P, C, W) > fitness(mejor, V, P, C, W):
-            mejor = np.copy(actual)
-        historial.append(fitness(mejor, V, P, C, W))
-        tabu.append(actual)
-        if len(tabu) > tabu_tam:
-            tabu.pop(0)
-    return mejor, historial
+        for i in range(N):
+            vecino = sol_actual.copy()
+            vecino[i] = 1 - vecino[i]
+            vecinos.append(vecino)
+        fitness_vecinos = [(v, calcular_fitness(v, valores, pesos, C, W)) for v in vecinos]
+        fitness_vecinos.sort(key=lambda x: x[1], reverse=True)
+        for v, f in fitness_vecinos:
+            if list(v) not in tabu_list:
+                sol_actual, fit_actual = v, f
+                break
+        if fit_actual > mejor_fit:
+            mejor, mejor_fit = sol_actual.copy(), fit_actual
+        tabu_list.append(list(sol_actual))
+        if len(tabu_list) > tabu_tam:
+            tabu_list.pop(0)
+        historico.append(mejor_fit)
+    return historico
 
-
+# =============================
 # Interfaz Streamlit
-st.title(" Programa de Cosecha - Metaheurísticas")
+# =============================
+st.title("Simulación de Cosecha de Caña de Azúcar")
+st.write("Optimización con Metaheurísticas: Genético, Recocido Simulado y Búsqueda Tabú")
 
-st.sidebar.header("Parámetros del Problema")
-N = st.sidebar.slider("Número de parcelas (N)", 5, 40, 20)
-trabajadores = st.sidebar.slider("Trabajadores", 1, 20, 8)
-min_kg = st.sidebar.slider("Kg mínimos por parcela", 50, 800, 100)
-max_kg = st.sidebar.slider("Kg máximos por parcela", 200, 1200, 600)
-min_h  = st.sidebar.slider("Horas mínimas por parcela", 1, 5, 1)
-max_h  = st.sidebar.slider("Horas máximas por parcela", 3, 12, 6)
-min_C  = st.sidebar.slider("Capacidad mínima vehículo (kg)", 500, 2500, 1500)
-max_C  = st.sidebar.slider("Capacidad máxima vehículo (kg)", 1000, 5000, 2500)
+# Parámetros del problema
+N = st.slider("Número de parcelas", 5, 20, 12)
+num_trabajadores = st.slider("Número de trabajadores", 1, 10, 6)
 
-algoritmo = st.selectbox("Seleccione Algoritmo",
-                         ["Genético", "Recocido Simulado", "Búsqueda Tabú"])
+# Generar datos
+np.random.seed(42)
+random.seed(42)
+valores = np.random.randint(100, 1201, size=N)
+pesos = np.round(np.random.uniform(1, 10, size=N), 1)
+C = random.randint(1000, 2500)
+W = num_trabajadores * 40
 
-if st.button("Generar y Resolver"):
-    V, P, C, W = inicializar_problema(N, trabajadores,
-                                      min_kg, max_kg,
-                                      min_h, max_h,
-                                      min_C, max_C)
+df_parcelas = pd.DataFrame({
+    "Parcela": range(1, N+1),
+    "Valor (kg)": valores,
+    "Peso (horas)": pesos
+})
 
-    st.subheader("📊 Parámetros Iniciales")
-    st.write(f"Capacidad de trabajo (W): **{W} horas**")
-    st.write(f"Capacidad vehículo (C): **{C} kg**")
-    st.dataframe({"Parcela": range(1, N+1), "Caña (kg)": V, "Horas": P})
+st.subheader("Parcelas iniciales")
+st.dataframe(df_parcelas)
+st.write(f"**Capacidad vehículo:** {C}")
+st.write(f"**Capacidad de trabajo total (horas):** {W}")
 
-    # Resolver con algoritmo elegido
+# Selección de algoritmo
+algoritmo = st.selectbox("Seleccione el algoritmo", ["Genético", "Recocido Simulado", "Búsqueda Tabú"])
+
+if st.button("Ejecutar optimización"):
     if algoritmo == "Genético":
-        mejor, historial = genetico(V, P, C, W)
+        historico = algoritmo_genetico(valores, pesos, C, W)
     elif algoritmo == "Recocido Simulado":
-        mejor, historial = recocido_simulado(V, P, C, W)
+        historico = recocido_simulado(valores, pesos, C, W)
     else:
-        mejor, historial = busqueda_tabu(V, P, C, W)
+        historico = busqueda_tabu(valores, pesos, C, W)
 
-    mejor_fitness = fitness(mejor, V, P, C, W)
-    st.success(f"✅ Mejor Fitness: **{mejor_fitness} kg**")
-
-    # Parcelas seleccionadas
-    idx = np.where(mejor == 1)[0]
-    st.subheader("Parcelas Seleccionadas")
-    if len(idx) > 0:
-        st.dataframe({
-            "Parcela": idx + 1,
-            "Caña (kg)": V[idx],
-            "Horas": P[idx]
-        })
-    else:
-        st.warning("No se seleccionó ninguna parcela (revisa restricciones).")
-
-    # Gráfica de evolución del fitness
     st.subheader("Evolución del Fitness")
-    fig, ax = plt.subplots()
-    ax.plot(historial, color="green")
-    ax.set_xlabel("Iteración")
-    ax.set_ylabel("Fitness (kg de caña)")
+    fig, ax = plt.subplots(figsize=(8,5))
+    ax.plot(historico, label=algoritmo, color="blue")
+    ax.set_xlabel("Iteraciones / Generaciones")
+    ax.set_ylabel("Mejor Fitness")
     ax.set_title(f"Evolución del Fitness - {algoritmo}")
+    ax.legend()
     st.pyplot(fig)
